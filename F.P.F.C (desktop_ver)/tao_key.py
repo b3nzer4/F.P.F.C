@@ -1,81 +1,146 @@
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives.hashes import SHA256
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.fernet import Fernet
-import os
-import base64
-import winreg
+import wmi
+import hashlib
+import platform
 import uuid
 import getpass
+import base64
 from tkinter import messagebox
+import os
+import win32crypt
+import win32security
+import logging
+from typing import List, Optional
 
-# Hàm tạo và lưu key vào Registry với bảo mật nâng cao
-def generate_and_store_key():
-    # Tạo đường dẫn registry phức tạp hơn và ít dự đoán hơn
-    machine_id = str(uuid.getnode())  # Lấy MAC address làm machine ID
-    username = getpass.getuser()
+# Cấu hình logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def get_hardware_info() -> List[str]:
+    """
+    Lấy thông tin phần cứng của máy tính.
     
-    # Tạo một registry path phức tạp hơn, khó đoán hơn
-    registry_path = f"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\Services\\{machine_id[-6:]}"
-    key_name = f"SystemService_{username[:2]}{len(username)}"
-
-    # Kiểm tra xem key đã tồn tại trong Registry hay chưa
+    Returns:
+        List[str]: Danh sách các thông tin phần cứng
+    """
+    hardware_info = []
+    
     try:
-        reg_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path, 0, winreg.KEY_READ)
-        encrypted_key, _ = winreg.QueryValueEx(reg_key, key_name)
-        winreg.CloseKey(reg_key)
+        c = wmi.WMI()
         
-        # Giải mã key đã lưu
-        machine_salt = machine_id.encode()
-        decryption_key = derive_key_from_machine(machine_salt)
-        fernet = Fernet(decryption_key)
-        stored_key = fernet.decrypt(encrypted_key.encode()).decode('utf-8')
-        
-        print("Key đã tồn tại trong Registry")
-        return stored_key
-    except (FileNotFoundError, PermissionError, ValueError):
-        pass  # Nếu không tìm thấy hoặc lỗi giải mã, tiếp tục tạo key mới
-
-    # Tạo key ngẫu nhiên
-    key = os.urandom(32)  # 32 bytes tương đương 256-bit key
-    key_b64 = base64.b64encode(key).decode('utf-8')
-
-    # Mã hóa key trước khi lưu
-    machine_salt = machine_id.encode()
-    encryption_key = derive_key_from_machine(machine_salt)
-    fernet = Fernet(encryption_key)
-    encrypted_key = fernet.encrypt(key_b64.encode()).decode('utf-8')
-
-    # Lưu key đã mã hóa vào Registry
-    try:
-        # Tạo registry key nếu chưa tồn tại
-        reg_key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, registry_path)
-        winreg.SetValueEx(reg_key, key_name, 0, winreg.REG_SZ, encrypted_key)
-        winreg.CloseKey(reg_key)
-        print("Key đã được tạo và lưu vào Registry an toàn")
+        # Lấy thông tin CPU
+        for cpu in c.Win32_Processor():
+            if cpu.ProcessorId:
+                hardware_info.append(cpu.ProcessorId.strip())
+                
+        # Lấy thông tin Mainboard
+        for board in c.Win32_BaseBoard():
+            if board.SerialNumber:
+                hardware_info.append(board.SerialNumber.strip())
+                
+        # Lấy thông tin ổ cứng
+        for disk in c.Win32_DiskDrive():
+            if disk.SerialNumber:
+                hardware_info.append(disk.SerialNumber.strip())
+                
+        # Lấy thông tin BIOS
+        for bios in c.Win32_BIOS():
+            if bios.SerialNumber:
+                hardware_info.append(bios.SerialNumber.strip())
+                
+        # Lấy thông tin Windows Product ID
+        for os_info in c.Win32_OperatingSystem():
+            if os_info.SerialNumber:
+                hardware_info.append(os_info.SerialNumber.strip())
+                
     except Exception as e:
-        print(f"Lỗi khi lưu key vào Registry: {e}")
+        logger.error(f"Lỗi khi lấy thông tin phần cứng: {e}")
+    
+    # Thêm MAC address
+    hardware_info.append(str(uuid.getnode()))
+    
+    return hardware_info
+
+def store_key_securely(key: bytes) -> bool:
+    """
+    Lưu key an toàn sử dụng Windows DPAPI.
+    
+    Args:
+        key: Key cần lưu (bytes)
+        
+    Returns:
+        bool: True nếu lưu thành công, False nếu thất bại
+    """
+    try:
+        # Tạo entropy từ thông tin phần cứng
+        entropy = ''.join(get_hardware_info()).encode()
+        
+        # Mã hóa key với DPAPI
+        encrypted_key = win32crypt.CryptProtectData(
+            key,
+            "F.P.F.C Security Key",
+            entropy,
+            None,
+            None,
+            0
+        )
+        
+        # Tạo thư mục nếu chưa tồn tại
+        key_file = os.path.join(os.environ['LOCALAPPDATA'], 'F.P.F.C', 'security.key')
+        os.makedirs(os.path.dirname(key_file), exist_ok=True)
+        
+        # Lưu key đã mã hóa
+        with open(key_file, 'wb') as f:
+            f.write(encrypted_key)
+            
+        logger.info("Đã lưu key thành công")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Lỗi khi lưu key: {e}")
+        return False
+
+def generate_hardware_key() -> Optional[str]:
+    """
+    Tạo key dựa trên thông tin phần cứng.
+    
+    Returns:
+        Optional[str]: Key dạng base64 nếu thành công, None nếu thất bại
+    """
+    try:
+        hardware_info = get_hardware_info()
+        
+        if not hardware_info:
+            logger.error("Không thể lấy thông tin phần cứng")
+            return None
+            
+        # Kết hợp thông tin phần cứng
+        combined_info = ''.join(hardware_info)
+        
+        # Tạo hash từ thông tin phần cứng
+        hash_object = hashlib.sha256(combined_info.encode())
+        hardware_key = hash_object.digest()
+        
+        # Đảm bảo key có độ dài 32 bytes
+        if len(hardware_key) != 32:
+            while len(hardware_key) < 32:
+                hardware_key += hash_object.digest()
+            hardware_key = hardware_key[:32]
+        
+        # Lưu key an toàn
+        if store_key_securely(hardware_key):
+            return base64.b64encode(hardware_key).decode('utf-8')
+            
+        return None
+        
+    except Exception as e:
+        logger.error(f"Lỗi khi tạo key: {e}")
         return None
 
-    return key_b64
-
-# Hàm tạo key từ thông tin máy tính
-def derive_key_from_machine(salt):
-    # Lấy thông tin cố định từ máy để tạo key
-    username = getpass.getuser().encode()
-    
-    # Sử dụng HKDF để tạo key từ thông tin máy
-    kdf = HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        info=username
-    )
-    derived_key = kdf.derive(username)
-    return base64.urlsafe_b64encode(derived_key)
-
-# Gọi hàm tạo và lưu key
 if __name__ == "__main__":
-    generate_and_store_key()
-    messagebox.showinfo("F.P.F.C","Đã tạo một key và lưu vào thiết bị an toàn")
+    key = generate_hardware_key()
+    if key:
+        logger.info("Đã tạo và lưu key bảo mật")
+        messagebox.showinfo("F.P.F.C", "Đã tạo và lưu key bảo mật")
+    else:
+        logger.error("Không thể lưu key bảo mật")
+        messagebox.showerror("F.P.F.C", "Không thể lưu key bảo mật")

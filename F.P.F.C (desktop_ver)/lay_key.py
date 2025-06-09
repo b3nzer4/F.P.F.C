@@ -1,56 +1,147 @@
-import winreg
+import wmi
+import hashlib
+import platform
 import uuid
 import getpass
 import base64
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.fernet import Fernet
+import os
+import win32crypt
+import logging
+from typing import List, Optional
 
-def key_giai_ma():
-    # Lấy thông tin máy để tạo đường dẫn registry giống như trong tao_key.py
-    machine_id = str(uuid.getnode())
-    username = getpass.getuser()
+# Cấu hình logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def get_hardware_info() -> List[str]:
+    """
+    Lấy thông tin phần cứng của máy tính.
     
-    # Sử dụng cùng đường dẫn registry phức tạp như trong tao_key.py
-    registry_path = f"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\Services\\{machine_id[-6:]}"
-    key_name = f"SystemService_{username[:2]}{len(username)}"
-
+    Returns:
+        List[str]: Danh sách các thông tin phần cứng
+    """
+    hardware_info = []
+    
     try:
-        # Mở Registry và lấy giá trị key đã mã hóa
-        reg_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path, 0, winreg.KEY_READ)
-        encrypted_key, _ = winreg.QueryValueEx(reg_key, key_name)
-        winreg.CloseKey(reg_key)
+        c = wmi.WMI()
         
-        # Giải mã key
-        machine_salt = machine_id.encode()
-        decryption_key = derive_key_from_machine(machine_salt)
-        fernet = Fernet(decryption_key)
-        stored_key = fernet.decrypt(encrypted_key.encode()).decode('utf-8')
-        
-        return stored_key
-    except FileNotFoundError:
-        print("Không tìm thấy key trong Registry. Đảm bảo key đã được tạo trước đó.")
-    except (PermissionError, ValueError) as e:
-        print(f"Lỗi khi giải mã key: {e}")
+        # Lấy thông tin CPU
+        for cpu in c.Win32_Processor():
+            if cpu.ProcessorId:
+                hardware_info.append(cpu.ProcessorId.strip())
+                
+        # Lấy thông tin Mainboard
+        for board in c.Win32_BaseBoard():
+            if board.SerialNumber:
+                hardware_info.append(board.SerialNumber.strip())
+                
+        # Lấy thông tin ổ cứng
+        for disk in c.Win32_DiskDrive():
+            if disk.SerialNumber:
+                hardware_info.append(disk.SerialNumber.strip())
+                
+        # Lấy thông tin BIOS
+        for bios in c.Win32_BIOS():
+            if bios.SerialNumber:
+                hardware_info.append(bios.SerialNumber.strip())
+                
+        # Lấy thông tin Windows Product ID
+        for os_info in c.Win32_OperatingSystem():
+            if os_info.SerialNumber:
+                hardware_info.append(os_info.SerialNumber.strip())
+                
     except Exception as e:
-        print(f"Lỗi khi lấy key từ Registry: {e}")
-    return None
-
-# Hàm tạo key từ thông tin máy tính - giống như trong tao_key.py
-def derive_key_from_machine(salt):
-    # Lấy thông tin cố định từ máy để tạo key
-    username = getpass.getuser().encode()
+        logger.error(f"Lỗi khi lấy thông tin phần cứng: {e}")
     
-    # Sử dụng HKDF để tạo key từ thông tin máy
-    kdf = HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        info=username
-    )
-    derived_key = kdf.derive(username)
-    return base64.urlsafe_b64encode(derived_key)
+    # Thêm MAC address
+    hardware_info.append(str(uuid.getnode()))
+    
+    return hardware_info
 
-# Sử dụng hàm để lấy key từ Registry
+def get_stored_key() -> Optional[str]:
+    """
+    Lấy key đã lưu sử dụng Windows DPAPI.
+    
+    Returns:
+        Optional[str]: Key dạng base64 nếu tìm thấy, None nếu không
+    """
+    try:
+        key_file = os.path.join(os.environ['LOCALAPPDATA'], 'F.P.F.C', 'security.key')
+        
+        if not os.path.exists(key_file):
+            return None
+            
+        with open(key_file, 'rb') as f:
+            encrypted_key = f.read()
+            
+        entropy = ''.join(get_hardware_info()).encode()
+        
+        try:
+            # Thử giải mã với entropy
+            decrypted_key = win32crypt.CryptUnprotectData(
+                encrypted_key,
+                entropy,
+                None,
+                None,
+                0
+            )
+        except Exception:
+            # Nếu thất bại, thử giải mã không có entropy
+            decrypted_key = win32crypt.CryptUnprotectData(
+                encrypted_key,
+                None,
+                None,
+                None,
+                0
+            )
+        
+        if decrypted_key and len(decrypted_key) > 1:
+            return base64.b64encode(decrypted_key[1]).decode('utf-8')
+        return None
+        
+    except Exception as e:
+        logger.error(f"Lỗi khi lấy key đã lưu: {e}")
+        return None
+
+def key_giai_ma() -> Optional[str]:
+    """
+    Lấy key dựa trên thông tin phần cứng.
+    
+    Returns:
+        Optional[str]: Key dạng base64 nếu thành công, None nếu thất bại
+    """
+    try:
+        # Thử lấy key đã lưu trước
+        stored_key = get_stored_key()
+        if stored_key:
+            return stored_key
+
+        # Nếu không tìm thấy key đã lưu, tạo key mới
+        hardware_info = get_hardware_info()
+        
+        if not hardware_info:
+            logger.error("Không thể lấy thông tin phần cứng")
+            return None
+            
+        # Kết hợp thông tin phần cứng
+        combined_info = ''.join(hardware_info)
+        
+        # Tạo hash từ thông tin phần cứng
+        hash_object = hashlib.sha256(combined_info.encode())
+        hardware_key = hash_object.digest()
+        
+        # Đảm bảo key có độ dài 32 bytes
+        if len(hardware_key) != 32:
+            while len(hardware_key) < 32:
+                hardware_key += hash_object.digest()
+            hardware_key = hardware_key[:32]
+        
+        return base64.b64encode(hardware_key).decode('utf-8')
+        
+    except Exception as e:
+        logger.error(f"Lỗi khi tạo key từ thông tin phần cứng: {e}")
+        return None
+
+# Lấy key khi module được import
 key_giai_maa = key_giai_ma()
 

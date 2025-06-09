@@ -94,13 +94,15 @@ if __name__ == '__main__':
                 msg = message_queue.get_nowait()
                 if msg['type'] == 'error':
                     messagebox.showerror("Lỗi", msg['message'])
+                    progress_bar.pack_forget()  # Ẩn progress bar khi có lỗi
                 elif msg['type'] == 'info':
                     messagebox.showinfo("Thông báo", msg['message'])
+                    progress_bar.pack_forget()  # Ẩn progress bar khi hoàn thành
                 elif msg['type'] == 'progress':
                     progress_bar.set(msg['value'])
                     if msg['value'] >= 1.0:
                         progress_bar.stop()
-                        progress_bar.pack_forget()
+                        progress_bar.pack_forget()  # Ẩn progress bar khi đạt 100%
                 elif msg['type'] == 'camera_status':
                     global camera_running
                     camera_running = msg['status']
@@ -133,6 +135,7 @@ if __name__ == '__main__':
                 message_queue.put({'type': 'error', 'message': str(e)})
             finally:
                 message_queue.put({'type': 'progress', 'value': 1.0})
+                progress_bar.pack_forget()  # Đảm bảo ẩn progress bar khi thread kết thúc
         
         thread = threading.Thread(target=thread_wrapper)
         thread.daemon = True
@@ -206,6 +209,7 @@ if __name__ == '__main__':
     def open_file():
         if current_file and selected_format and not camera_running:
             progress_bar.pack(pady=10)
+            progress_bar.set(0)  # Reset progress bar về 0
             progress_bar.start()
             run_in_thread(chay_file, current_file, selected_format)
         elif camera_running:
@@ -225,6 +229,7 @@ if __name__ == '__main__':
             if key:
                 if kt:
                     progress_bar.pack(pady=10)
+                    progress_bar.set(0)  # Reset progress bar về 0
                     progress_bar.start()
                     
                     # Add a success message for the queue
