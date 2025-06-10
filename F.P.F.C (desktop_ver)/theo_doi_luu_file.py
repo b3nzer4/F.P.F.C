@@ -5,107 +5,95 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from kiem_tra_xoa_file import *
 
-def theo_doi_luu_file(stop_flag):
-    
-    def tach_xau(s):
-        last_backslash_index = s.rfind('\\')
-        if last_backslash_index == -1:
+def theo_doi_luu_file(co_dung):
+    def tach_ten(s):
+        idx = s.rfind('\\')
+        if idx == -1:
             return s
-        return s[last_backslash_index + 1:]
+        return s[idx + 1:]
 
     def xoa_file(duong_dan):
         try:
-            # Thêm bước chuẩn hóa đường dẫn
             duong_dan = os.path.normpath(duong_dan)
             if not ("C:\\data_F.P.F.C" in duong_dan) and os.path.exists(duong_dan):
                 os.remove(duong_dan)
-                print(f"Đã xóa thành công: {duong_dan}")
+                print(f"Đã xóa: {duong_dan}")
         except Exception as e:
-            print(f"Lỗi khi xóa file {duong_dan}: {str(e)}")
+            print(f"Lỗi xóa file {duong_dan}: {str(e)}")
 
-    # Các định dạng file ảnh hợp lệ
-    DINH_DANG_FILE = {
-        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp",".doc", ".docx",
-        ".xls", ".xlsx",".ppt", ".pptx",".pdf", ".png", ".jpg", ".jpeg", ".gif",
-        ".bmp", ".svg", ".tiff", ".webp",".mp4", ".mp3", # Hình ảnh
-        ".txt", ".odt", ".rtf", ".md", ".tex",  # Văn bản
-        ".csv", ".ods",  # Bảng tính
-        ".mkv", ".mov", ".avi", ".flv", ".wmv", ".webm",  # Video
-        ".wav", ".aac", ".flac", ".ogg", ".m4a",  # Âm thanh
-        ".zip", ".rar", ".7z", ".tar", ".gz", ".iso",  # File nén
+    DINH_DANG = {
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp", ".doc", ".docx",
+        ".xls", ".xlsx", ".ppt", ".pptx", ".pdf", ".png", ".jpg", ".jpeg", ".gif",
+        ".bmp", ".svg", ".tiff", ".webp", ".mp4", ".mp3",
+        ".txt", ".odt", ".rtf", ".md", ".tex",
+        ".csv", ".ods",
+        ".mkv", ".mov", ".avi", ".flv", ".wmv", ".webm",
+        ".wav", ".aac", ".flac", ".ogg", ".m4a",
+        ".zip", ".rar", ".7z", ".tar", ".gz", ".iso",
         ".bin", ".exe", ".dll", ".apk", ".deb", ".dmg", ".pkg", ".msi"
     }
 
-    def check(path):
-        _, extension = os.path.splitext(path)
-        return extension.lower() in DINH_DANG_FILE
+    def hop_le(duong_dan):
+        _, ext = os.path.splitext(duong_dan)
+        return ext.lower() in DINH_DANG
 
-    def xu_ly_file_moi(event):
+    def xu_ly_moi(event):
         try:
-            src_path = event.src_path
-            
+            src = event.src_path
             if os.name == 'nt':
-                if isinstance(src_path, bytes):
-                    src_path = src_path.decode('utf-8', errors='replace')
-                src_path = os.path.abspath(src_path)
-            
-            if not ("C:\\data_F.P.F.C" in src_path) and check(src_path):
-                print(f"Phát hiện file mới: {src_path}")
-                ten_file=tach_xau(src_path)
-                kiem_tra_xoa_file(ten_file)
-                xoa_file(src_path)
-                
+                if isinstance(src, bytes):
+                    src = src.decode('utf-8', errors='replace')
+                src = os.path.abspath(src)
+            if not ("C:\\data_F.P.F.C" in src) and hop_le(src):
+                print(f"Phát hiện file mới: {src}")
+                ten = tach_ten(src)
+                kiem_tra_xoa_file(ten)
+                xoa_file(src)
         except UnicodeDecodeError:
-            print(f"Lỗi decoding đường dẫn: {event.src_path}")
+            print(f"Lỗi decoding: {event.src_path}")
         except Exception as e:
             print(f"Lỗi xử lý file: {str(e)}")
 
-    def lay_danh_sach_o_dia():
-        o_dia = []
-        for partition in psutil.disk_partitions():
+    def o_dia():
+        ds = []
+        for p in psutil.disk_partitions():
             if os.name == 'nt':
-                o_dia.append(partition.device)
+                ds.append(p.device)
             else:
-                o_dia.append(partition.mountpoint)
-        return o_dia
+                ds.append(p.mountpoint)
+        return ds
 
-    def theo_doi_thu_muc(thu_muc_goc):
-        print(f"Theo dõi thư mục: {thu_muc_goc}")
-        observer = Observer()
-        event_handler = FileSystemEventHandler()
-        event_handler.on_created = xu_ly_file_moi
-        observer.schedule(event_handler, thu_muc_goc, recursive=True)
-        observer.start()
-        return observer
+    def theo_doi_thu_muc(thu_muc):
+        print(f"Theo dõi: {thu_muc}")
+        obs = Observer()
+        handler = FileSystemEventHandler()
+        handler.on_created = xu_ly_moi
+        obs.schedule(handler, thu_muc, recursive=True)
+        obs.start()
+        return obs
 
     try:
-        danh_sach_o_dia = lay_danh_sach_o_dia()
-        observers = []
-        for o_dia in danh_sach_o_dia:
-            observer = theo_doi_thu_muc(o_dia)
-            observers.append(observer)
-
-        # Chờ đến khi stop_flag được set
-        while not stop_flag.is_set():
+        ds_o = o_dia()
+        obs = []
+        for o in ds_o:
+            ob = theo_doi_thu_muc(o)
+            obs.append(ob)
+        while not co_dung.is_set():
             time.sleep(2)
-
-        # Dừng tất cả Observer khi stop_flag được set
-        for observer in observers:
-            observer.stop()
-        for observer in observers:
-            observer.join()
-
+        for ob in obs:
+            ob.stop()
+        for ob in obs:
+            ob.join()
     except KeyboardInterrupt:
         print("\nDừng theo dõi do ngắt từ bàn phím.")
-        for observer in observers:
-            observer.stop()
-        for observer in observers:
-            observer.join()
+        for ob in obs:
+            ob.stop()
+        for ob in obs:
+            ob.join()
     except Exception as e:
         print(f"Lỗi không mong muốn: {str(e)}")
     finally:
-        # Đảm bảo dọn dẹp ngay cả khi có lỗi
-        for observer in observers:
-            if observer.is_alive():
-                observer.stop()
-                observer.join()
+        for ob in obs:
+            if ob.is_alive():
+                ob.stop()
+                ob.join()

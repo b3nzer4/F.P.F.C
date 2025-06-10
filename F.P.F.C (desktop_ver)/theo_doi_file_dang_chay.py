@@ -3,7 +3,7 @@ import time
 import os
 from giai_ma import *
 
-def theo_doi_file_dang_chay(stop_event, current_file, selected_format):
+def theo_doi_file_dang_chay(co_dung, tep_hien_tai, dinh_dang):
     def xoa_file(duong_dan):
         try:
             if os.path.exists(duong_dan):
@@ -14,49 +14,48 @@ def theo_doi_file_dang_chay(stop_event, current_file, selected_format):
         except Exception as e:
             print(f"Lỗi khi xóa tệp: {e}")
 
-    lmao, file_name = giai_ma(current_file, selected_format)
-    def check_file_process(target):
-        target = target.lower()
-        for proc in psutil.process_iter():
+    tep_tam, ten_tep = giai_ma(tep_hien_tai, dinh_dang)
+    def kiem_tra_tien_trinh(tep):
+        tep = tep.lower()
+        for tien_trinh in psutil.process_iter():
             try:
-                cmdline = " ".join(proc.cmdline()).lower()
-                if target in cmdline:
-                    return True, proc.pid
+                lenh = " ".join(tien_trinh.cmdline()).lower()
+                if tep in lenh:
+                    return True, tien_trinh.pid
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
         return False, None
 
     def theo_doi():
-        print(f"Bắt đầu theo dõi file: '{file_name}'...")
-        previous_status = False
-        last_pid = None
+        print(f"Bắt đầu theo dõi file: '{ten_tep}'...")
+        trang_thai_truoc = False
+        pid_cuoi = None
 
         try:
-            while not stop_event.is_set():
-                current_status, pid = check_file_process(file_name)
+            while not co_dung.is_set():
+                trang_thai_hien_tai, pid = kiem_tra_tien_trinh(ten_tep)
                 
-                if current_status != previous_status:
-                    if current_status:
-                        last_pid = pid
+                if trang_thai_hien_tai != trang_thai_truoc:
+                    if trang_thai_hien_tai:
+                        pid_cuoi = pid
                         print(f"[PHÁT HIỆN] File đang được mở bởi PID {pid}")
                         print(f"[CHI TIẾT] Ứng dụng: {psutil.Process(pid).name()}")
                     else:
                         print(f"[ĐÓNG FILE] Không còn hoạt động")
-                        last_pid = None
+                        pid_cuoi = None
                         break
-                    previous_status = current_status
+                    trang_thai_truoc = trang_thai_hien_tai
 
-                time.sleep(0.5)  # Giảm CPU usage
+                time.sleep(0.5)
 
         finally:
-            # Xử lý dừng tiến trình khi nhận stop_event
-            if last_pid is not None:
+            if pid_cuoi is not None:
                 try:
-                    proc = psutil.Process(last_pid)
-                    proc.terminate()
-                    print(f"\n Đã dừng tiến trình {last_pid}")
+                    tien_trinh = psutil.Process(pid_cuoi)
+                    tien_trinh.terminate()
+                    print(f"\n Đã dừng tiến trình {pid_cuoi}")
                 except psutil.NoSuchProcess:
-                    print(f"\n Tiến trình {last_pid} không tồn tại")
+                    print(f"\n Tiến trình {pid_cuoi} không tồn tại")
 
     theo_doi()
-    xoa_file(lmao)
+    xoa_file(tep_tam)
