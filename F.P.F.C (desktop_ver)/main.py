@@ -1,6 +1,6 @@
 """
 F.P.F.C - File Protection and File Conversion
-Author: b3nzer4tz (bennyzzz1909@gmail.com)
+Author: berN4tz (bennyzzz1909@gmail.com)
 4txinhvcl:))
 """
 from tkinter.filedialog import askopenfilename
