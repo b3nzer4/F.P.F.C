@@ -425,8 +425,6 @@ if __name__ == '__main__':
         "Hình ảnh": ["png", "jpg", "jpeg", "gif", "bmp", "svg", "tiff", "webp"],
         "Video": ["mp4", "mkv", "mov", "avi", "flv", "wmv", "webm"],
         "Âm thanh": ["mp3", "wav", "aac", "flac", "ogg", "m4a"],
-        "Nén": ["zip", "rar", "7z", "tar", "gz", "iso"],
-        "Thực thi": ["bin", "exe", "dll", "apk", "deb", "dmg", "pkg", "msi"]
     }
 
     # Tạo danh sách phẳng chứa tất cả các định dạng
